@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from .models import SessionAuth, User
 from .serializers import SessionAuthSerializer
+from rest_framework.decorators import api_view
 import uuid
 
 FANDOMAT_URL = 'http://127.0.0.1:8001/api/welcome/'  # фейковый адрес
@@ -32,7 +33,7 @@ class QRScanView(APIView):
                 'username': user.username,
                 'full_name': user.full_name,
                 'phone': user.phone,
-                'balance' : balance,
+                'balance' : user.balance,
             }
             # отправляем в фандомат
             requests.post(FANDOMAT_URL, json=data)
@@ -63,9 +64,6 @@ class AuthorizeSessionView(APIView):
         )
         return Response({"status": "ok"}, status=200)
 
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-
 
 @api_view(['GET'])
 def session_status(request, session_id):
@@ -79,3 +77,37 @@ def session_status(request, session_id):
         })
     except SessionAuth.DoesNotExist:
         return Response({"authorized": False})
+
+# views.py
+from django.views import View
+from django.shortcuts import render
+from .models import SessionAuth
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+class ScannerRedirectView(View):
+    def get(self, request, session_id):
+        try:
+            # ⚠️ Вместо этого — в будущем авторизованный пользователь из мобильного приложения
+            user = User.objects.get(id=1)  # для теста
+
+            SessionAuth.objects.update_or_create(
+                session_id=session_id,
+                defaults={"user": user}
+            )
+            return render(request, "scanner_success.html", {"user": user})
+        except Exception as e:
+            return render(request, "scanner_fail.html", {"error": str(e)})
+
+class CheckSessionStatusView(APIView):
+    def get(self, request, session_id):
+        try:
+            session = SessionAuth.objects.get(session_id=session_id)
+            return Response({
+                "authorized": True,
+                "user_id": session.user.id,
+                "full_name": session.user.full_name
+            })
+        except SessionAuth.DoesNotExist:
+            return Response({"authorized": False})

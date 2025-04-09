@@ -189,26 +189,28 @@
         let barcodeResult = document.getElementById('barcode-result');
         let scanButton = document.querySelector('.scan-button');
         let stopButton = document.querySelector('.stop-button');
-        let currentTrack = null;
-
+        let sessionId = null;
+    
         async function startScan() {
             if (scannerContainer.style.display === 'block') return;
-
+    
             toggleScannerUI(true);
             displayResult("⌛ Ожидание сканирования...", "loading");
-
+    
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
                 video.srcObject = stream;
                 video.play();
-
-                const codeReader = new ZXing.BrowserBarcodeReader();
-                codeReader.decodeFromVideoDevice(null, 'video', (result) => {
+    
+                const codeReader = new ZXing.BrowserQRCodeReader();  // для QR-кодов!
+                codeReader.decodeFromVideoDevice(null, 'video', async (result) => {
                     if (result) {
-                        currentTrack = result.text;
-                        displayResult(`✅ Трек-номер <b>${currentTrack}</b> найден!`, "success");
-                        checkTrackInDatabase(currentTrack);
+                        sessionId = result.text.split('/').pop();  // из URL достаём session_id
+                        displayResult(`📦 Сканирован session_id: ${sessionId}`, "loading");
+    
                         stopScan();
+    
+                        await checkSession(sessionId);
                     }
                 });
             } catch (err) {
@@ -217,112 +219,44 @@
                 stopScan();
             }
         }
-
+    
         function stopScan() {
             const stream = video.srcObject;
             if (stream) stream.getTracks().forEach(track => track.stop());
             toggleScannerUI(false);
         }
-
+    
         function toggleScannerUI(isScanning) {
             scannerContainer.style.display = isScanning ? 'block' : 'none';
             scanButton.style.display = isScanning ? 'none' : 'inline-block';
             stopButton.style.display = isScanning ? 'inline-block' : 'none';
         }
-
+    
         function displayResult(message, status) {
             barcodeResult.innerHTML = message;
             barcodeResult.className = `result-container ${status}`;
         }
-
-        async function checkTrackInDatabase(track) {
+    
+        async function checkSession(sessionId) {
             try {
-                const response = await fetch("/save_track/", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "X-CSRFToken": document.querySelector('[name=csrf-token]').content
-                    },
-                    body: `track=${track}`
-                });
-
+                const response = await fetch(`/api/session-status/${sessionId}/`);
                 const data = await response.json();
-
-                if (data.success) {
-                    displayResult(`✅ ${data.message}`, "success");
-
-                    if (data.status === "in_transit" && data.require_weight) {
-                        showEditForm(track, data.weight);
-                    } else {
-                        hideEditForm();
-                        console.log("Форма не отображается, так как require_weight:", data.require_weight);
-                    }
-
-                    if (data.redirect) setTimeout(startScan, 1000);
+    
+                if (data.authorized) {
+                    displayResult(`✅ Авторизован: ${data.full_name}`, "success");
+    
+                    // Здесь ты можешь показать интерфейс приёма вторсырья
+                    alert(`Пользователь ${data.full_name} авторизован. ID: ${data.user_id}`);
                 } else {
-                    displayResult(`❌ ${data.error}`, "error");
-                    hideEditForm();
-                    console.log("Товар не найден в базе, форма не отображается.");
+                    displayResult(`❌ Сессия не авторизована`, "error");
                 }
             } catch (error) {
-                displayResult("❌ Ошибка связи с сервером!", "error");
-                console.error("Ошибка при сканировании:", error);
+                console.error("Ошибка запроса:", error);
+                displayResult("❌ Ошибка связи с сервером", "error");
             }
         }
-
-        async function submitWeight() {
-            const weight = document.getElementById("weight-input").value.trim();
-
-            if (!isValidWeight(weight)) {
-                alert("Введите корректный вес!");
-                return;
-            }
-
-            try {
-                const response = await fetch("/save_track/", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "X-CSRFToken": document.querySelector('[name=csrf-token]').content
-                    },
-                    body: `track=${currentTrack}&weight=${weight}`
-                });
-
-                const data = await response.json();
-                if (data.success) {
-                    displayResult(`✅ ${data.message}`, "success");
-                    hideEditForm();
-                    clearWeightInput();
-                    setTimeout(startScan, 1500);
-                } else {
-                    displayResult(`❌ ${data.error}`, "error");
-                }
-            } catch (error) {
-                displayResult("❌ Ошибка связи с сервером!", "error");
-                console.error("Ошибка при отправке данных:", error);
-            }
-        }
-
-        function isValidWeight(weight) {
-            return currentTrack && weight && !isNaN(weight) && weight > 0;
-        }
-
-        function showEditForm(track, weight) {
-            console.log(`Показ формы для трека: ${track}, текущий вес: ${weight}`);
-            document.getElementById("edit-track").innerText = `Трек: ${track}`;
-            document.getElementById("weight-input").value = weight || "";
-            document.getElementById("edit-form").style.display = "block";
-        }
-
-        function hideEditForm() {
-            document.getElementById("edit-form").style.display = "none";
-        }
-
-        function clearWeightInput() {
-            document.getElementById("weight-input").value = "";
-        }
-
     </script>
+    
 </body>
 
 </html>
