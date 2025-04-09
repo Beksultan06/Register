@@ -11,3 +11,12 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         return User.objects.create_user(**validated_data)
+
+# serializers.py
+from rest_framework import serializers
+from .models import SessionAuth
+
+class SessionAuthSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SessionAuth
+        fields = ['session_id', 'user']

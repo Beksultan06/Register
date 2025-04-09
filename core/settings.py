@@ -26,7 +26,7 @@ SECRET_KEY = "django-insecure-^4q-_jq%a7wi5(ft!$hl15d0z0z1x%k340*j#259or%+$e(n8l
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["8a9b-158-181-248-104.ngrok-free.app"]
 
 
 # Application definition
@@ -56,7 +56,6 @@ REST_FRAMEWORK = {
     ),
 }
 
-
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -69,10 +68,12 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = "core.urls"
 
+LOGIN_REDIRECT_URL = '/api/v1/users/scanner/'
+
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / 'templates'],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
