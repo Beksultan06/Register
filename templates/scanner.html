@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Сканер</title>
+    <script src="https://unpkg.com/@zxing/library@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: #000;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        
+        /* Контейнер для сканера */
+        .scanner-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            aspect-ratio: 4/3;
+            background: black;
+            display: none;
+        }
+        
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 10px;
+        }
+        
+        /* Кнопки */
+        .button-container {
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .scan-button,
+        .stop-button {
+            background-color: #F39800;
+            border: none;
+            border-radius: 8px;
+            color: #000;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            font-weight: bold;
+            text-transform: uppercase;
+            transition: all 0.3s;
+        }
+        
+        .stop-button {
+            display: none;
+            background-color: #ff4c4c;
+        }
+        
+        /* Результат сканирования */
+        .result-container {
+            margin-top: 20px;
+            font-size: 18px;
+            font-weight: bold;
+            text-align: center;
+            padding: 10px;
+            border-radius: 8px;
+            min-width: 250px;
+        }
+        
+        .success {
+            background-color: #0a0;
+            color: #fff;
+        }
+        
+        .error {
+            background-color: #a00;
+            color: #fff;
+        }
+        
+        .loading {
+            background-color: #ffa500;
+            color: #000;
+        }
+        
+        /* Форма для ввода веса */
+        #edit-form {
+            display: none;
+            background: #333;  /* Светлый фон для формы */
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            margin-top: 20px;
+            box-shadow: 0px 0px 15px rgba(255, 255, 255, 0.5);  /* Больше тени для выделения формы */
+            max-width: 320px;
+            color: #fff;
+            z-index: 10;  /* Убедимся, что форма всегда сверху */
+            position: relative;
+        }
+        
+        #edit-form label {
+            font-size: 16px;
+            font-weight: bold;
+            display: block;
+            margin-bottom: 10px;
+            color: #F39800;
+        }
+        
+        #edit-form p {
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+        
+        #weight-input {
+            width: 100%;
+            padding: 10px;
+            font-size: 16px;
+            border: 2px solid #F39800;
+            border-radius: 5px;
+            background: #000;
+            color: #fff;
+            text-align: center;
+        }
+        
+        #weight-input:focus {
+            outline: none;
+            border-color: #FFD700;
+        }
+        
+        #edit-form button {
+            background-color: #F39800;
+            border: none;
+            border-radius: 5px;
+            color: #000;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 15px;
+            transition: background 0.3s;
+            width: 100%;
+        }
+        
+        #edit-form button:hover {
+            background-color: #FFD700;
+        }
+        
+    </style>
+</head>
+
+<body>
+    <div class="scanner-container">
+        <video id="video" playsinline></video>
+    </div>
+
+    <div class="button-container">
+        <button class="scan-button" onclick="startScan()">📷 Сканировать</button>
+        <button class="stop-button" onclick="stopScan()">🛑 Остановить</button>
+    </div>
+
+    <div id="barcode-result" class="result-container"></div>
+
+    <!-- Форма для ввода веса -->
+    <div id="edit-form" style="display: none; margin-top: 20px;">
+        <p id="edit-track" style="font-weight: bold;"></p>
+        <label style="color: white;" for="weight-input">Введите вес (кг):</label>
+        <input type="number" id="weight-input" step="0.1" placeholder="Вес в кг">
+        <button onclick="submitWeight()">✅ Сохранить</button>
+    </div>
+
+    <script>
+        let video = document.getElementById('video');
+        let scannerContainer = document.querySelector('.scanner-container');
+        let barcodeResult = document.getElementById('barcode-result');
+        let scanButton = document.querySelector('.scan-button');
+        let stopButton = document.querySelector('.stop-button');
+        let currentTrack = null;
+
+        async function startScan() {
+            if (scannerContainer.style.display === 'block') return;
+
+            toggleScannerUI(true);
+            displayResult("⌛ Ожидание сканирования...", "loading");
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                video.srcObject = stream;
+                video.play();
+
+                const codeReader = new ZXing.BrowserBarcodeReader();
+                codeReader.decodeFromVideoDevice(null, 'video', (result) => {
+                    if (result) {
+                        currentTrack = result.text;
+                        displayResult(`✅ Трек-номер <b>${currentTrack}</b> найден!`, "success");
+                        checkTrackInDatabase(currentTrack);
+                        stopScan();
+                    }
+                });
+            } catch (err) {
+                console.error("Ошибка доступа к камере:", err);
+                displayResult("❌ Доступ к камере отклонён!", "error");
+                stopScan();
+            }
+        }
+
+        function stopScan() {
+            const stream = video.srcObject;
+            if (stream) stream.getTracks().forEach(track => track.stop());
+            toggleScannerUI(false);
+        }
+
+        function toggleScannerUI(isScanning) {
+            scannerContainer.style.display = isScanning ? 'block' : 'none';
+            scanButton.style.display = isScanning ? 'none' : 'inline-block';
+            stopButton.style.display = isScanning ? 'inline-block' : 'none';
+        }
+
+        function displayResult(message, status) {
+            barcodeResult.innerHTML = message;
+            barcodeResult.className = `result-container ${status}`;
+        }
+
+        async function checkTrackInDatabase(track) {
+            try {
+                const response = await fetch("/save_track/", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "X-CSRFToken": document.querySelector('[name=csrf-token]').content
+                    },
+                    body: `track=${track}`
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    displayResult(`✅ ${data.message}`, "success");
+
+                    if (data.status === "in_transit" && data.require_weight) {
+                        showEditForm(track, data.weight);
+                    } else {
+                        hideEditForm();
+                        console.log("Форма не отображается, так как require_weight:", data.require_weight);
+                    }
+
+                    if (data.redirect) setTimeout(startScan, 1000);
+                } else {
+                    displayResult(`❌ ${data.error}`, "error");
+                    hideEditForm();
+                    console.log("Товар не найден в базе, форма не отображается.");
+                }
+            } catch (error) {
+                displayResult("❌ Ошибка связи с сервером!", "error");
+                console.error("Ошибка при сканировании:", error);
+            }
+        }
+
+        async function submitWeight() {
+            const weight = document.getElementById("weight-input").value.trim();
+
+            if (!isValidWeight(weight)) {
+                alert("Введите корректный вес!");
+                return;
+            }
+
+            try {
+                const response = await fetch("/save_track/", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "X-CSRFToken": document.querySelector('[name=csrf-token]').content
+                    },
+                    body: `track=${currentTrack}&weight=${weight}`
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    displayResult(`✅ ${data.message}`, "success");
+                    hideEditForm();
+                    clearWeightInput();
+                    setTimeout(startScan, 1500);
+                } else {
+                    displayResult(`❌ ${data.error}`, "error");
+                }
+            } catch (error) {
+                displayResult("❌ Ошибка связи с сервером!", "error");
+                console.error("Ошибка при отправке данных:", error);
+            }
+        }
+
+        function isValidWeight(weight) {
+            return currentTrack && weight && !isNaN(weight) && weight > 0;
+        }
+
+        function showEditForm(track, weight) {
+            console.log(`Показ формы для трека: ${track}, текущий вес: ${weight}`);
+            document.getElementById("edit-track").innerText = `Трек: ${track}`;
+            document.getElementById("weight-input").value = weight || "";
+            document.getElementById("edit-form").style.display = "block";
+        }
+
+        function hideEditForm() {
+            document.getElementById("edit-form").style.display = "none";
+        }
+
+        function clearWeightInput() {
+            document.getElementById("weight-input").value = "";
+        }
+
+    </script>
+</body>
+
+</html>
