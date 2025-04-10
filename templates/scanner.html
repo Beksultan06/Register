@@ -183,6 +183,16 @@
         <button onclick="submitWeight()">✅ Сохранить</button>
     </div>
 
+
+    <!-- Форма логина -->
+    <div id="login-form">
+        <h2>🔐 Вход в систему</h2>
+        <input type="text" id="username" placeholder="Имя пользователя"><br><br>
+        <input type="password" id="password" placeholder="Пароль"><br><br>
+        <button onclick="login()">Войти</button>
+    </div>
+    
+
     <script>
         let video = document.getElementById('video');
         let scannerContainer = document.querySelector('.scanner-container');
@@ -190,8 +200,48 @@
         let scanButton = document.querySelector('.scan-button');
         let stopButton = document.querySelector('.stop-button');
         let sessionId = null;
+        let token = null;  // JWT-токен
     
+        // Авторизация пользователя
+        async function login() {
+            const username = document.getElementById("username").value.trim();
+            const password = document.getElementById("password").value.trim();
+    
+            if (!username || !password) {
+                alert("Введите логин и пароль");
+                return;
+            }
+    
+            try {
+                const response = await fetch('/api/v1/users/token/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+    
+                if (!response.ok) throw new Error("Ошибка авторизации");
+    
+                const data = await response.json();
+                token = data.access;
+    
+                // Показываем интерфейс сканера
+                document.getElementById("login-form").style.display = "none";
+                document.querySelector('.button-container').style.display = "flex";
+    
+                alert("✅ Успешный вход!");
+            } catch (err) {
+                console.error(err);
+                alert("❌ Неверный логин или пароль");
+            }
+        }
+    
+        // Запуск сканера
         async function startScan() {
+            if (!token) {
+                alert("Сначала войдите в аккаунт");
+                return;
+            }
+    
             if (scannerContainer.style.display === 'block') return;
     
             toggleScannerUI(true);
@@ -202,14 +252,18 @@
                 video.srcObject = stream;
                 video.play();
     
-                const codeReader = new ZXing.BrowserQRCodeReader();  // для QR-кодов!
+                const codeReader = new ZXing.BrowserQRCodeReader();
                 codeReader.decodeFromVideoDevice(null, 'video', async (result) => {
                     if (result) {
-                        sessionId = result.text.split('/').pop();  // из URL достаём session_id
+                        sessionId = result.text.split('/').pop();
                         displayResult(`📦 Сканирован session_id: ${sessionId}`, "loading");
     
                         stopScan();
     
+                        // 👉 Сохраняем session_id в БД
+                        await authorizeSession(sessionId);
+    
+                        // 👉 Проверяем статус
                         await checkSession(sessionId);
                     }
                 });
@@ -237,15 +291,41 @@
             barcodeResult.className = `result-container ${status}`;
         }
     
+        // 👉 POST на /api/authorize/
+        async function authorizeSession(sessionId) {
+            try {
+                const response = await fetch('/api/v1/users/api/authorize/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ session_id: sessionId })
+                });
+    
+                if (!response.ok) throw new Error("Ошибка авторизации сессии");
+    
+                const data = await response.json();
+                console.log("[✓] Сессия сохранена:", data);
+            } catch (err) {
+                console.error("Ошибка при сохранении сессии:", err);
+                displayResult("❌ Не удалось авторизовать сессию", "error");
+            }
+        }
+    
+        // 👉 GET на /api/session-status/
         async function checkSession(sessionId) {
             try {
-                const response = await fetch(`/api/session-status/${sessionId}/`);
+                const response = await fetch(`/api/session-status/${sessionId}/`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+    
                 const data = await response.json();
     
                 if (data.authorized) {
                     displayResult(`✅ Авторизован: ${data.full_name}`, "success");
-    
-                    // Здесь ты можешь показать интерфейс приёма вторсырья
                     alert(`Пользователь ${data.full_name} авторизован. ID: ${data.user_id}`);
                 } else {
                     displayResult(`❌ Сессия не авторизована`, "error");
@@ -256,6 +336,8 @@
             }
         }
     </script>
+    
+    
     
 </body>
 

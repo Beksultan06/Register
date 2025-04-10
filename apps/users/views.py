@@ -14,14 +14,33 @@ from .models import SessionAuth, User
 from .serializers import SessionAuthSerializer
 from rest_framework.decorators import api_view
 import uuid
+from django.contrib.auth.hashers import make_password
 
 FANDOMAT_URL = 'http://127.0.0.1:8001/api/welcome/'  # фейковый адрес
 
-class RegisterView(CreateAPIView):
-    queryset = User.objects.all()
-    serializer_class = RegisterSerializer
-    permission_classes = []
+# User = get_user_model()
 
+class RegisterView(APIView):
+    def post(self, request):
+        username = request.data.get("username")
+        password = request.data.get("password")
+        full_name = request.data.get("full_name")
+        phone = request.data.get("phone")
+
+        if not all([username, password, full_name, phone]):
+            return Response({"error": "Все поля обязательны"}, status=400)
+
+        if User.objects.filter(username=username).exists():
+            return Response({"error": "Пользователь уже существует"}, status=400)
+
+        user = User.objects.create(
+            username=username,
+            password=make_password(password),
+            full_name=full_name,
+            phone=phone
+        )
+        return Response({"message": "Пользователь создан", "user_id": user.id}, status=201)
+    
 class QRScanView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -41,30 +60,39 @@ class QRScanView(APIView):
         except User.DoesNotExist:
             return Response({"error": "Пользователь не найден"}, status=404)
 
-@login_required
+# @login_required
 def scanner_view(request):
     return render(request, 'scanner.html')
 
 class AuthorizeSessionView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def post(self, request):
-        session_id = request.data.get('session_id')
-        user_id = request.data.get('user_id')
+        session_id = request.data.get("session_id")
+        user = request.user
 
-        if not session_id or not user_id:
-            return Response({"detail": "session_id и user_id обязательны"}, status=400)
-        
+        if not session_id:
+            return Response({"detail": "session_id обязателен"}, status=400)
+
         try:
-            user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            return Response({"detail": "Пользователь не найден"}, status=404)
+            session_uuid = uuid.UUID(session_id)
+        except ValueError:
+            return Response({"detail": "Неверный формат session_id"}, status=400)
 
-        session_obj, created = SessionAuth.objects.update_or_create(
-            session_id=uuid.UUID(session_id),
+        # Сохраняем в базу
+        session, created = SessionAuth.objects.update_or_create(
+            session_id=session_uuid,
             defaults={"user": user}
         )
-        return Response({"status": "ok"}, status=200)
 
-
+        return Response({
+            "status": "authorized",
+            "session_id": str(session.session_id),
+            "user_id": user.id,
+            "created": created
+        }, status=200)
+        
+        
 @api_view(['GET'])
 def session_status(request, session_id):
     try:
@@ -86,20 +114,27 @@ from django.contrib.auth import get_user_model
 
 User = get_user_model()
 
-class ScannerRedirectView(View):
-    def get(self, request, session_id):
+class ScannerView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, session_id):
         try:
-            # ⚠️ Вместо этого — в будущем авторизованный пользователь из мобильного приложения
-            user = User.objects.get(id=1)  # для теста
+            session_uuid = uuid.UUID(session_id)
+            user = request.user  # ← вот тут получаем из токена
 
             SessionAuth.objects.update_or_create(
-                session_id=session_id,
+                session_id=session_uuid,
                 defaults={"user": user}
             )
-            return render(request, "scanner_success.html", {"user": user})
-        except Exception as e:
-            return render(request, "scanner_fail.html", {"error": str(e)})
 
+            return Response({
+                "status": "authorized",
+                "user_id": user.id,
+                "session_id": str(session_uuid)
+            })
+        except Exception as e:
+            return Response({"error": str(e)}, status=400)
+        
 class CheckSessionStatusView(APIView):
     def get(self, request, session_id):
         try:
